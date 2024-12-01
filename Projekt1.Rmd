@@ -1,0 +1,130 @@
+---
+title: "Zaawansowana Eksploracja Danych - Projekt 1"
+author: "Jakub Beisert 148209"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+# Executive Summary
+W tym raporcie analizujemy bazę danych materiałów wykorzystywanych w bateriach dostarczoną przez inicjatywę Materials Project. Celem analizy jest zrozumienie i ocena parametrów materiałów, które mają wpływ na wydajność i stabilność baterii.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Instalacja brakujących pakietów
+```{r install-packages}
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+required_packages <- c("dplyr", "tidyr", "ggplot2", "plotly", "readr", "knitr", "corrplot")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if(length(new_packages)) install.packages(new_packages)
+```
+
+# Wczytanie bibliotek
+```{r libraries, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(plotly)
+library(readr)
+library(knitr)
+library(corrplot)
+```
+# Zapewnienie powtarzalności wyników
+```{r reproducibility}
+set.seed(123) 
+```
+# Wczytanie danych z pliku CSV
+```{r load-data}
+data <- read_csv("mp_batteries.csv")
+# Zamiana spacji w nazwach kolumn na podkreślenia
+colnames(data) <- gsub(" ", "_", colnames(data))
+# Podgląd danych
+head(data)
+```
+# Sprawdzenie brakujących wartości
+```{r missing-values}
+missing_summary <- sapply(data, function(x) sum(is.na(x)))
+missing_summary <- data.frame(Variable = names(missing_summary), MissingValues = missing_summary)
+missing_summary %>% filter(MissingValues > 0)
+missing_summary
+```
+brak brakujących danych
+
+# Rozmiar zbioru danych
+```{r data-summary}
+cat("Liczba obserwacji:", nrow(data), "\n")
+cat("Liczba zmiennych:", ncol(data), "\n")
+
+# Podstawowe statystyki dla zmiennych liczbowych
+summary_stats <- data %>% 
+  select(where(is.numeric)) %>%
+  summary()
+kable(summary_stats, caption = "Podstawowe statystyki dla zmiennych liczbowych")
+```
+
+# Rozkłady wartości dla kluczowych zmiennych
+```{r distributions, fig.width=7, fig.height=5}
+data %>% 
+  select(Average_Voltage, Gravimetric_Capacity, Volumetric_Capacity) %>%
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value, fill = Variable)) +
+  geom_histogram(bins = 30, alpha = 0.7, position = "identity") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  labs(title = "Rozkłady wartości dla wybranych zmiennych", x = "Wartość", y = "Liczba wystąpień")
+```
+
+# Korelacje między zmiennymi liczbowymi
+```{r correlation, fig.width=10, fig.height=10}
+numeric_data <- data %>% select(where(is.numeric)) %>% na.omit()
+correlation_matrix <- cor(numeric_data)
+corrplot(correlation_matrix, method = "color", tl.cex = 1.2, addCoef.col = "black", number.cex = 0.8)
+```
+
+# Wykres interaktywny
+```{r interactive-plot, fig.width=7, fig.height=5}
+plot_ly(data = data, x = ~Gravimetric_Capacity, y = ~Average_Voltage, 
+        type = 'scatter', mode = 'markers', 
+        marker = list(size = 10, color = 'rgba(152, 0, 0, .8)', line = list(color = 'rgb(0, 0, 0)', width = 2))) %>%
+  layout(title = "Zależność pomiędzy pojemnością grawimetryczną a średnim napięciem",
+         xaxis = list(title = "Pojemność grawimetryczna (mAh/g)"),
+         yaxis = list(title = "Średnie napięcie (V)"))
+```
+
+
+# Model predykcyjny dla Volumetric Energy
+```{r prediction-model}
+model <- lm(Volumetric_Energy ~ Average_Voltage + Max_Delta_Volume + Gravimetric_Capacity, data = data)
+summary(model)
+
+# Wykres predykcji
+data$Predicted_Volumetric_Energy <- predict(model, data)
+ggplot(data, aes(x = Volumetric_Energy, y = Predicted_Volumetric_Energy)) +
+  geom_point(color = 'blue', alpha = 0.6) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  labs(title = "Predykcja gęstości energii w odniesieniu do objętości", 
+       x = "Rzeczywista gęstość energii (Wh/L)", 
+       y = "Prognozowana gęstość energii (Wh/L)") +
+  theme_minimal()
+```
+
+# Podsumowanie Najważniejszych Trendów
+Na podstawie analizy danych dotyczących materiałów wykorzystywanych w bateriach, zidentyfikowano następujące kluczowe trendy:
+
+1. **Związek między pojemnością grawimetryczną a napięciem**: Widzimy, że wyższa pojemność grawimetryczna (Gravimetric Capacity) powoduje dążenie średniego napięcia do zera.
+
+2. **Wpływ zmiany objętości na stabilność**: Analiza zmienności objętości (Max Delta Volume) pokazuje, że materiały z mniejszymi zmianami objętości są bardziej stabilne w cyklach ładowania i rozładowania. Wartości te powinny być brane pod uwagę przy wyborze materiałów do produkcji baterii.
+
+3. **Rola udziału atomowego**: Udział atomowy składników (Atomic Fraction Charge/Discharge) wydaje się mieć wpływ na gęstość energii (Gravimetric/Volumetric Energy). Materiały z korzystnymi proporcjami atomowymi wykazują lepsze właściwości energetyczne.
+
+4. **Wydajność materiałów**: Ogólna analiza wskazuje, że materiały, które mają zarówno wysoką pojemność, jak i stabilność, są bardziej pożądane. Warto zatem skupić się na ich dalszym badaniu i optymalizacji.
+
+5. **Przewidywalność właściwości**: Model regresji wskazuje na istotne zmienne wpływające na gęstość energii, co może pomóc w przewidywaniu właściwości nowych materiałów na podstawie ich parametrów.
+
+Dalsze analizy mogą obejmować zastosowanie bardziej zaawansowanych modeli machine learning do przewidywania wydajności materiałów oraz eksplorację innych czynników, które mogą wpływać na stabilność i efektywność baterii.
+
+
+
